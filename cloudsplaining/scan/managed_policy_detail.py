@@ -77,7 +77,32 @@ class ManagedPolicyDetails:
         for policy_detail in self.policy_details:
             if policy_detail.arn == arn:
                 return policy_detail
-        raise Exception("Managed Policy ARN %s not found.", arn)
+        # If policy is not included in policy_details, try to get it from AWS api
+        try:
+           return self.get_policy_detail_from_api(arn) 
+        except:
+            raise Exception("Managed Policy ARN %s not found.", arn)
+
+    def get_policy_detail_from_api(self, arn: str) -> "ManagedPolicy":
+        import boto3
+        iam = boto3.client('iam')
+        policy = iam.get_policy(PolicyArn=arn)['Policy'] 
+
+        # get full version list 
+        versions_response = iam.list_policy_versions(PolicyArn=arn)
+        versions = versions_response['Versions']
+        while versions_response['IsTruncated']:
+            versions_response = iam.list_policy_versions(PolicyArn=arn, Marker=versions_response['Marker'])
+            versions.extend(versions_response['Versions'])
+
+        # get default version
+        default_version_id = [version for version in versions if version['IsDefaultVersion'] == True][0]['VersionId']
+        default_version = iam.get_policy_version(PolicyArn=arn, VersionId=default_version_id)['PolicyVersion']
+        policy['PolicyVersionList'] = [default_version]
+
+        policy_obj = ManagedPolicy(policy)
+        self.policy_details.append(policy_obj)
+        return policy_obj
 
     @property
     def all_infrastructure_modification_actions(self) -> List[str]:
